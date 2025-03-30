@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AutoFill SISVAN - Completo (Mejorado)
 // @namespace    http://tampermonkey.net/
-// @version      5.1
+// @version      5.3
 // @description  Autocompleta el formulario SISVAN con datos de CSV y selecciona la institución educativa.
 // @match        https://docs.google.com/forms/*1FAIpQLSeERJOjmc-5ubYtuxSk7xD1IHKGRl_jfGNHbM3JB1KqaZ9ISw*
 // @grant        none
@@ -13,6 +13,13 @@
     let datosCSV = null;
     const MAX_INTENTOS = 5;
     const RETRASO_MIN = 400;
+    let autoCargarInterval = null;
+    let estaAutoCargando = sessionStorage.getItem('autoCargarActivo') === 'true';
+
+    function guardarEstadoAutoCargar(estado) {
+        estaAutoCargando = estado;
+        sessionStorage.setItem('autoCargarActivo', estado);
+    }
 
     function crearInterfazCarga() {
         const contenedor = document.createElement("div");
@@ -62,30 +69,78 @@
             cursor: "pointer"
         });
 
-        botonCargar.addEventListener("mouseover", () => botonCargar.style.backgroundColor = "#0056b3");
-        botonCargar.addEventListener("mouseout", () => botonCargar.style.backgroundColor = "#007BFF");
-
-        botonCargar.addEventListener("click", () => {
-            const valores = inputTexto.value.split(",").map(val => val.trim());
-            if (valores.length < 7) return alert("Error: Se requieren al menos 7 valores en el CSV.");
-
-            localStorage.setItem("datosCSV", inputTexto.value);
-
-            datosCSV = {
-                nombres_transcriptor: valores[0],
-                cedula_transcriptor: valores[1],
-                categoria_id: valores[2],
-                fecha_abordaje: convertirFecha(valores[4]),
-                municipio1: valores[3] || "",
-                municipio2: valores[5] || "",
-                institucion: valores[6] || ""
-            };
-
-            llenarPrimeraPagina(datosCSV, 0);
+        const botonAutoCargar = document.createElement("button");
+        botonAutoCargar.innerText = estaAutoCargando ? "Detener Auto Carga" : "Auto Cargar (1s)";
+        Object.assign(botonAutoCargar.style, {
+            display: "block",
+            width: "100%",
+            padding: "10px",
+            marginTop: "10px",
+            backgroundColor: estaAutoCargando ? "#dc3545" : "#28a745",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            fontSize: "16px",
+            cursor: "pointer"
         });
 
-        contenedor.append(titulo, inputTexto, botonCargar);
+        botonCargar.addEventListener("mouseover", () => botonCargar.style.backgroundColor = "#0056b3");
+        botonCargar.addEventListener("mouseout", () => botonCargar.style.backgroundColor = "#007BFF");
+        botonAutoCargar.addEventListener("mouseover", () => botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#bd2130" : "#218838");
+        botonAutoCargar.addEventListener("mouseout", () => botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#dc3545" : "#28a745");
+
+        botonCargar.addEventListener("click", () => {
+            cargarDatosDesdeCSV(inputTexto.value);
+        });
+
+        botonAutoCargar.addEventListener("click", () => {
+            const nuevoEstado = !estaAutoCargando;
+            guardarEstadoAutoCargar(nuevoEstado);
+
+            if (nuevoEstado) {
+                botonAutoCargar.innerText = "Detener Auto Carga";
+                botonAutoCargar.style.backgroundColor = "#dc3545";
+                autoCargarInterval = setInterval(() => {
+                    cargarDatosDesdeCSV(inputTexto.value);
+                }, 500);
+            } else {
+                botonAutoCargar.innerText = "Auto Cargar (1s)";
+                botonAutoCargar.style.backgroundColor = "#28a745";
+                clearInterval(autoCargarInterval);
+                autoCargarInterval = null;
+            }
+        });
+
+        contenedor.append(titulo, inputTexto, botonCargar, botonAutoCargar);
         document.body.appendChild(contenedor);
+
+        if (estaAutoCargando) {
+            autoCargarInterval = setInterval(() => {
+                cargarDatosDesdeCSV(inputTexto.value);
+            }, 500);
+        }
+    }
+
+    function cargarDatosDesdeCSV(csvText) {
+        const valores = csvText.split(",").map(val => val.trim());
+        if (valores.length < 7) {
+            console.error("Error: Se requieren al menos 7 valores en el CSV.");
+            return;
+        }
+
+        localStorage.setItem("datosCSV", csvText);
+
+        datosCSV = {
+            nombres_transcriptor: valores[0],
+            cedula_transcriptor: valores[1],
+            categoria_id: valores[2],
+            fecha_abordaje: convertirFecha(valores[4]),
+            municipio1: valores[3] || "",
+            municipio2: valores[5] || "",
+            institucion: valores[6] || ""
+        };
+
+        llenarPrimeraPagina(datosCSV, 0);
     }
 
     function convertirFecha(fecha) {
@@ -193,6 +248,13 @@
         seleccionarInstitucion(datos.institucion);
         setTimeout(() => siguientePagina(intentos, () => console.log("✔ Formulario completado.")), RETRASO_MIN);
     }
+
+    // Limpiar sessionStorage al cerrar la pestaña
+    window.addEventListener('beforeunload', function() {
+        if (!estaAutoCargando) {
+            sessionStorage.removeItem('autoCargarActivo');
+        }
+    });
 
     crearInterfazCarga();
 })();
