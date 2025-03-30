@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Completo
+// @name         AutoFill SISVAN - Completo (Mejorado)
 // @namespace    http://tampermonkey.net/
-// @version      5.0
+// @version      5.1
 // @description  Autocompleta el formulario SISVAN con datos de CSV y selecciona la institución educativa.
 // @match        https://docs.google.com/forms/*1FAIpQLSeERJOjmc-5ubYtuxSk7xD1IHKGRl_jfGNHbM3JB1KqaZ9ISw*
 // @grant        none
@@ -12,22 +12,58 @@
 
     let datosCSV = null;
     const MAX_INTENTOS = 5;
-    const RETRASO_MIN = 400; // Mayor tiempo para evitar errores
+    const RETRASO_MIN = 400;
 
     function crearInterfazCarga() {
         const contenedor = document.createElement("div");
         Object.assign(contenedor.style, {
-            position: "fixed", top: "10px", left: "10px",
-            backgroundColor: "white", padding: "10px",
-            boxShadow: "0px 0px 10px rgba(0,0,0,0.2)", zIndex: "10000"
+            position: "fixed",
+            top: "20px",
+            left: "20px",
+            backgroundColor: "#f9f9f9",
+            padding: "15px",
+            borderRadius: "10px",
+            boxShadow: "0px 4px 10px rgba(0,0,0,0.2)",
+            zIndex: "10000",
+            fontFamily: "Arial, sans-serif",
+            width: "350px"
         });
 
+        const titulo = document.createElement("h3");
+        titulo.innerText = "Autocompletar SISVAN";
+        Object.assign(titulo.style, { margin: "0 0 10px", color: "#333", textAlign: "center" });
+
         const inputTexto = document.createElement("textarea");
-        Object.assign(inputTexto, { placeholder: "Pega la fila del CSV...", rows: 2, cols: 50 });
+        Object.assign(inputTexto, {
+            placeholder: "Nombre, Cedula,Origen del caso,caso social,fecha dia/mes/año,Municipio,parroquia",
+            rows: 3,
+            cols: 50,
+            width: "100%",
+            padding: "8px",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            fontSize: "14px",
+            resize: "none"
+        });
         inputTexto.value = localStorage.getItem("datosCSV") || "";
 
         const botonCargar = document.createElement("button");
         botonCargar.innerText = "Cargar Datos";
+        Object.assign(botonCargar.style, {
+            display: "block",
+            width: "100%",
+            padding: "10px",
+            marginTop: "10px",
+            backgroundColor: "#007BFF",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            fontSize: "16px",
+            cursor: "pointer"
+        });
+
+        botonCargar.addEventListener("mouseover", () => botonCargar.style.backgroundColor = "#0056b3");
+        botonCargar.addEventListener("mouseout", () => botonCargar.style.backgroundColor = "#007BFF");
 
         botonCargar.addEventListener("click", () => {
             const valores = inputTexto.value.split(",").map(val => val.trim());
@@ -36,19 +72,19 @@
             localStorage.setItem("datosCSV", inputTexto.value);
 
             datosCSV = {
-                nombres_transcriptor: valores[0],  // Primera página
-                cedula_transcriptor: valores[1],   // Primera página
-                categoria_id: valores[2],          // Primera página
-                fecha_abordaje: convertirFecha(valores[4]),  // Tercera página
-                municipio1: valores[3] || "",      // Tercera página
-                municipio2: valores[5] || "",      // cuarta página
-                institucion: valores[6] || ""      // quinta página
+                nombres_transcriptor: valores[0],
+                cedula_transcriptor: valores[1],
+                categoria_id: valores[2],
+                fecha_abordaje: convertirFecha(valores[4]),
+                municipio1: valores[3] || "",
+                municipio2: valores[5] || "",
+                institucion: valores[6] || ""
             };
 
             llenarPrimeraPagina(datosCSV, 0);
         });
 
-        contenedor.append(inputTexto, botonCargar);
+        contenedor.append(titulo, inputTexto, botonCargar);
         document.body.appendChild(contenedor);
     }
 
@@ -86,7 +122,6 @@
             opcion.click();
             console.log(`✔ Categoría seleccionada: ${nombre}`);
 
-            // Confirmar que se seleccionó correctamente
             setTimeout(() => {
                 const isSelected = opcion.getAttribute("aria-checked") === "true";
                 if (!isSelected) {
