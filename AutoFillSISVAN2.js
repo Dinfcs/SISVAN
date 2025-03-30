@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Rápido y Reintentos
+// @name         AutoFill SISVAN - Rápido y Reintentos (Mejorado)
 // @namespace    http://tampermonkey.net/
-// @version      4.3
+// @version      4.4
 // @description  Autocompleta el formulario SISVAN con datos de CSV y selecciona la institución educativa.
 // @match        https://docs.google.com/forms/*1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q*
 // @grant        none
@@ -13,42 +13,139 @@
     let datosCSV = null;
     const MAX_INTENTOS = 5;
     const RETRASO_MIN = 300; // Milisegundos entre intentos
+    let autoCargarInterval = null;
+    let estaAutoCargando = sessionStorage.getItem('autoCargarActivo') === 'true';
+
+    function guardarEstadoAutoCargar(estado) {
+        estaAutoCargando = estado;
+        sessionStorage.setItem('autoCargarActivo', estado);
+    }
 
     function crearInterfazCarga() {
         const contenedor = document.createElement("div");
         Object.assign(contenedor.style, {
-            position: "fixed", top: "10px", left: "10px",
-            backgroundColor: "white", padding: "10px",
-            boxShadow: "0px 0px 10px rgba(0,0,0,0.2)", zIndex: "10000"
+            position: "fixed",
+            top: "10px",
+            left: "10px",
+            backgroundColor: "white",
+            padding: "15px",
+            borderRadius: "8px",
+            boxShadow: "0px 0px 10px rgba(0,0,0,0.2)",
+            zIndex: "10000",
+            fontFamily: "Arial, sans-serif",
+            width: "300px"
+        });
+
+        const titulo = document.createElement("h4");
+        titulo.innerText = "Autocompletar SISVAN";
+        Object.assign(titulo.style, {
+            margin: "0 0 10px 0",
+            color: "#333",
+            textAlign: "center"
         });
 
         const inputTexto = document.createElement("textarea");
-        Object.assign(inputTexto, { placeholder: "Pega la fila del CSV...", rows: 2, cols: 50 });
+        Object.assign(inputTexto, {
+            placeholder: "Nombre, Cedula, Fecha (dia/mes/año), Municipio1, Municipio2, Institución",
+            rows: 3,
+            cols: 40,
+            width: "100%",
+            padding: "8px",
+            marginBottom: "10px",
+            border: "1px solid #ddd",
+            borderRadius: "4px",
+            fontSize: "14px"
+        });
         inputTexto.value = localStorage.getItem("datosCSV") || "";
 
         const botonCargar = document.createElement("button");
         botonCargar.innerText = "Cargar Datos";
-
-        botonCargar.addEventListener("click", () => {
-            const valores = inputTexto.value.split(",").map(val => val.trim());
-            if (valores.length < 6) return alert("Error: Se requieren al menos 6 valores en el CSV.");
-
-            localStorage.setItem("datosCSV", inputTexto.value);
-
-            datosCSV = {
-                nombres_transcriptor: valores[0],
-                cedula_transcriptor: valores[1],
-                fecha_abordaje: convertirFecha(valores[2]),
-                municipio1: valores[3] || "",
-                municipio2: valores[4] || "",
-                institucion: valores[5] || ""
-            };
-
-            llenarPrimeraPagina(datosCSV, 0);
+        Object.assign(botonCargar.style, {
+            width: "100%",
+            padding: "8px",
+            margin: "5px 0",
+            backgroundColor: "#4285f4",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer"
         });
 
-        contenedor.append(inputTexto, botonCargar);
+        const botonAutoCargar = document.createElement("button");
+        botonAutoCargar.innerText = estaAutoCargando ? "Detener Auto Carga" : "Auto Cargar (1s)";
+        Object.assign(botonAutoCargar.style, {
+            width: "100%",
+            padding: "8px",
+            margin: "5px 0",
+            backgroundColor: estaAutoCargando ? "#ea4335" : "#34a853",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer"
+        });
+
+        // Efectos hover
+        botonCargar.addEventListener("mouseover", () => botonCargar.style.backgroundColor = "#3367d6");
+        botonCargar.addEventListener("mouseout", () => botonCargar.style.backgroundColor = "#4285f4");
+        botonAutoCargar.addEventListener("mouseover", () => {
+            botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#d33426" : "#2d9246";
+        });
+        botonAutoCargar.addEventListener("mouseout", () => {
+            botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#ea4335" : "#34a853";
+        });
+
+        botonCargar.addEventListener("click", () => {
+            cargarDatosDesdeCSV(inputTexto.value);
+        });
+
+        botonAutoCargar.addEventListener("click", () => {
+            const nuevoEstado = !estaAutoCargando;
+            guardarEstadoAutoCargar(nuevoEstado);
+
+            if (nuevoEstado) {
+                botonAutoCargar.innerText = "Detener Auto Carga";
+                botonAutoCargar.style.backgroundColor = "#ea4335";
+                autoCargarInterval = setInterval(() => {
+                    cargarDatosDesdeCSV(inputTexto.value);
+                }, 1000);
+            } else {
+                botonAutoCargar.innerText = "Auto Cargar (1s)";
+                botonAutoCargar.style.backgroundColor = "#34a853";
+                clearInterval(autoCargarInterval);
+                autoCargarInterval = null;
+            }
+        });
+
+        contenedor.append(titulo, inputTexto, botonCargar, botonAutoCargar);
         document.body.appendChild(contenedor);
+
+        // Iniciar auto-carga si estaba activo
+        if (estaAutoCargando) {
+            autoCargarInterval = setInterval(() => {
+                cargarDatosDesdeCSV(inputTexto.value);
+            }, 1000);
+        }
+    }
+
+    function cargarDatosDesdeCSV(csvText) {
+        const valores = csvText.split(",").map(val => val.trim());
+        if (valores.length < 6) {
+            console.error("Error: Se requieren al menos 6 valores en el CSV.");
+            return;
+        }
+
+        localStorage.setItem("datosCSV", csvText);
+
+        datosCSV = {
+            nombres_transcriptor: valores[0],
+            cedula_transcriptor: valores[1],
+            fecha_abordaje: convertirFecha(valores[2]),
+            municipio1: valores[3] || "",
+            municipio2: valores[4] || "",
+            institucion: valores[5] || ""
+        };
+
+        llenarPrimeraPagina(datosCSV, 0);
     }
 
     function convertirFecha(fecha) {
@@ -130,6 +227,13 @@
         seleccionarInstitucion(datos.institucion);
         setTimeout(() => siguientePagina(intentos, () => console.log("✔ Formulario completado.")), RETRASO_MIN);
     }
+
+    // Limpiar sessionStorage al cerrar la pestaña si no está activo
+    window.addEventListener('beforeunload', function() {
+        if (!estaAutoCargando) {
+            sessionStorage.removeItem('autoCargarActivo');
+        }
+    });
 
     crearInterfazCarga();
 })();
