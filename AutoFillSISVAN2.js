@@ -46,7 +46,7 @@
 
         const inputTexto = document.createElement("textarea");
         Object.assign(inputTexto, {
-            placeholder: "Nombre, Cedula, Fecha (dia/mes/año), Municipio1, Municipio2, Institución",
+            placeholder: "Nombre,Cedula,Fecha (dia/mes/año),Municipio,Parroquia,Institución",
             rows: 3,
             cols: 40,
             width: "100%",
