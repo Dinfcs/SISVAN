@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Premium Edition v6.7
+// @name         AutoFill SISVAN - Premium Edition v6.8
 // @namespace    http://tampermonkey.net/
-// @version      6.7
-// @description  Añadido botón de minimizar, diseño premium a la izquierda.
+// @version      6.8
+// @description  Minimizado mantiene el botón RELLENAR visible. Diseño premium.
 // @author       User
 // @match        https://docs.google.com/forms/d/e/1FAIpQLSeERJOjmc-5ubYtuxSk7xD1IHKGRl_jfGNHbM3JB1KqaZ9ISw/*
 // @match        https://docs.google.com/forms/*
@@ -25,20 +25,22 @@
             z-index: 100000;
             font-family: 'Segoe UI', Roboto, Arial, sans-serif;
             border: 1px solid rgba(26, 115, 232, 0.2);
-            transition: width 0.3s ease, height 0.3s ease;
+            transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s;
             overflow: hidden;
         }
-        #sv-panel.minimized { width: 140px; height: 45px; }
+        
+        /* Estado Minimizado: Barra Horizontal */
+        #sv-panel.minimized { width: 200px; height: 46px; border-radius: 12px; }
         #sv-panel.minimized .sv-main { display: none; }
         
         .sv-head-btns {
-            display: flex; gap: 5px; padding: 8px;
+            display: flex; gap: 6px; padding: 8px;
             background: #f8f9fa;
             border-radius: 16px 16px 0 0;
             border-bottom: 1px solid #eee;
             align-items: center;
         }
-        #sv-panel.minimized .sv-head-btns { border-radius: 16px; border-bottom: none; }
+        #sv-panel.minimized .sv-head-btns { border-radius: 12px; border-bottom: none; height: 100%; box-sizing: border-box; }
 
         .sv-main { padding: 12px 15px 15px; max-height: 75vh; overflow-y: auto; }
         .sv-tag { display: block; font-size: 10px; color: #70757a; font-weight: 700; margin: 8px 0 3px; text-transform: uppercase; }
@@ -54,16 +56,21 @@
             border: none; border-radius: 8px;
             cursor: pointer; font-weight: 600; font-size: 10px;
             transition: all 0.2s; text-align: center; text-transform: uppercase;
-            height: 30px;
+            height: 30px; display: flex; align-items: center; justify-content: center;
         }
-        .btn-fill { flex: 2; background: #1a73e8; color: white; }
+        
+        .btn-fill { flex: 3; background: #1a73e8; color: white; }
         .btn-fill:hover { background: #1557b0; }
+        
         .btn-auto { flex: 2; background: #fff; color: #3c4043; border: 1px solid #dadce0; }
         .btn-auto.on { background: #e6f4ea; color: #137333; border-color: #ceead6; font-weight: 800; }
-        .btn-min { flex: 1; background: #eee; color: #666; font-size: 14px; }
         
-        #sv-panel.minimized .btn-fill, #sv-panel.minimized .btn-auto { display: none; }
-        #sv-panel.minimized .btn-min { flex: 1; background: #1a73e8; color: white; }
+        .btn-min { width: 30px; flex: none; background: #eee; color: #666; font-size: 14px; }
+        
+        /* Reglas cuando está minimizado */
+        #sv-panel.minimized .btn-auto { display: none; }
+        #sv-panel.minimized .btn-fill { font-size: 9px; }
+        #sv-panel.minimized .btn-min { background: #fff; border: 1px solid #ddd; }
 
         .sv-q-paste { background: #fffde7; border: 1px dashed #fbc02d; margin-bottom: 10px; }
         .sv-sep { height: 1px; background: #eee; margin: 15px 0 10px; position: relative; }
@@ -91,7 +98,6 @@
         const head = crearEl('div', { className: 'sv-head-btns' });
         const main = crearEl('div', { className: 'sv-main' });
 
-        // Botones superiores
         const runBtn = crearEl('button', { id: 'sv-run', className: 'sv-btn-top btn-fill', textContent: 'RELLENAR' });
         const autoBtn = crearEl('button', { id: 'sv-auto', className: 'sv-btn-top btn-auto', textContent: 'AUTO: OFF' });
         const minBtn = crearEl('button', { id: 'sv-min', className: 'sv-btn-top btn-min', textContent: '—' });
@@ -99,7 +105,7 @@
         head.append(runBtn, autoBtn, minBtn);
 
         const config = [
-            { id: 'q', label: '⚡ Pegado Inteligente', class: 'sv-q-paste', ph: 'Pegar datos aquí...' },
+            { id: 'q', label: '⚡ Pegado Inteligente', class: 'sv-q-paste', ph: 'Pesta datos aquí...' },
             { id: 'n', label: '👤 Transcriptor', ph: 'Nombre' },
             { id: 'c', label: '🆔 Cédula', ph: 'Cédula' },
             { id: 'ct', label: '📂 Categoría', ph: 'Categoría' },
@@ -122,7 +128,6 @@
         win.append(head, main);
         document.body.appendChild(win);
 
-        // Aplicar estado de minimizado guardado
         if (sessionStorage.getItem('sv_minimized') === 'true') {
             win.classList.add('minimized');
             minBtn.textContent = '▢';
@@ -132,7 +137,7 @@
     }
 
     function setupLogic(win, minBtn) {
-        const saved = JSON.parse(localStorage.getItem('sv_pro_v67') || '{}');
+        const saved = JSON.parse(localStorage.getItem('sv_pro_v68') || '{}');
         const ids = ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'];
         
         ids.forEach(id => {
@@ -141,14 +146,12 @@
             el.addEventListener('input', save);
         });
 
-        // Toggle Minimizar
         minBtn.addEventListener('click', () => {
             const isMin = win.classList.toggle('minimized');
             minBtn.textContent = isMin ? '▢' : '—';
             sessionStorage.setItem('sv_minimized', isMin);
         });
 
-        // Pegado rápido
         document.getElementById('sv-in-q').addEventListener('input', (e) => {
             const val = e.target.value.split(',').map(s => s.trim());
             if (val.length >= 7) {
@@ -185,11 +188,11 @@
     function save() {
         const d = {};
         ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'].forEach(id => d[id] = document.getElementById('sv-in-' + id).value);
-        localStorage.setItem('sv_pro_v67', JSON.stringify(d));
+        localStorage.setItem('sv_pro_v68', JSON.stringify(d));
     }
 
     function fill() {
-        const d = JSON.parse(localStorage.getItem('sv_pro_v67') || '{}');
+        const d = JSON.parse(localStorage.getItem('sv_pro_v68') || '{}');
         if (!d.n) return;
 
         const in_1_4 = document.querySelector('input[aria-labelledby="i1 i4"]');
