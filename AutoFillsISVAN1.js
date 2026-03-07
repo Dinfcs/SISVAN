@@ -1,260 +1,231 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Completo (Mejorado)
+// @name         AutoFill SISVAN - Premium Edition v6.5
 // @namespace    http://tampermonkey.net/
-// @version      5.3
-// @description  Autocompleta el formulario SISVAN con datos de CSV y selecciona la institución educativa.
-// @match        https://docs.google.com/forms/*1FAIpQLSeERJOjmc-5ubYtuxSk7xD1IHKGRl_jfGNHbM3JB1KqaZ9ISw*
+// @version      6.5
+// @description  Interfaz elegante a la izquierda, sin retraso y ultra precisa.
+// @author       User
+// @match        https://docs.google.com/forms/d/e/1FAIpQLSeERJOjmc-5ubYtuxSk7xD1IHKGRl_jfGNHbM3JB1KqaZ9ISw/*
+// @match        https://docs.google.com/forms/*
 // @grant        none
+// @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    let datosCSV = null;
-    const MAX_INTENTOS = 5;
-    const RETRASO_MIN = 400;
-    let autoCargarInterval = null;
-    let estaAutoCargando = sessionStorage.getItem('autoCargarActivo') === 'true';
+    const RETRASO_ACCION = 600;
 
-    function guardarEstadoAutoCargar(estado) {
-        estaAutoCargando = estado;
-        sessionStorage.setItem('autoCargarActivo', estado);
+    // Estilos Premium
+    const CSS_PREMIUM = `
+        #sv-panel {
+            position: fixed; top: 15px; left: 15px; width: 310px;
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            z-index: 100000;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            border: 1px solid rgba(26, 115, 232, 0.2);
+            transition: all 0.3s ease;
+        }
+        .sv-head {
+            background: linear-gradient(135deg, #1a73e8, #1557b0);
+            color: white; padding: 14px;
+            font-weight: 600; text-align: center;
+            border-radius: 16px 16px 0 0;
+            font-size: 15px; letter-spacing: 0.5px;
+        }
+        .sv-main { padding: 15px; max-height: 82vh; overflow-y: auto; }
+        .sv-tag { display: block; font-size: 10px; color: #70757a; font-weight: 700; margin: 8px 0 3px; text-transform: uppercase; }
+        .sv-field {
+            width: 100%; padding: 9px 12px; border: 1px solid #dee2e6; border-radius: 8px;
+            font-size: 13px; margin-bottom: 6px; box-sizing: border-box;
+            transition: border-color 0.2s; background: #f8f9fa;
+        }
+        .sv-field:focus { border-color: #1a73e8; outline: none; background: #fff; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
+        .sv-action-btn {
+            width: 100%; padding: 11px; border: none; border-radius: 10px;
+            cursor: pointer; font-weight: 600; font-size: 13px; margin-top: 10px;
+            transition: transform 0.1s, background 0.2s;
+        }
+        .sv-action-btn:active { transform: scale(0.98); }
+        .btn-prime { background: #1a73e8; color: white; }
+        .btn-prime:hover { background: #1557b0; }
+        .btn-status { background: #f1f3f4; color: #3c4043; border: 1px solid #dadce0; }
+        .btn-status.on { background: #e6f4ea; color: #137333; border-color: #ceead6; }
+        .sv-q-paste { background: #fffde7; border: 1px dashed #fbc02d; margin-bottom: 12px; }
+        .sv-sep { height: 1px; background: #eee; margin: 12px 0; position: relative; }
+        .sv-sep::after { content: "DATOS BENEFICIARIO"; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); background: white; padding: 0 8px; font-size: 8px; color: #aaa; }
+    `;
+
+    function crearEl(tag, props = {}, style = {}) {
+        const el = document.createElement(tag);
+        Object.assign(el, props);
+        Object.assign(el.style, style);
+        return el;
     }
 
-    function crearInterfazCarga() {
-        const contenedor = document.createElement("div");
-        Object.assign(contenedor.style, {
-            position: "fixed",
-            top: "20px",
-            left: "20px",
-            backgroundColor: "#f9f9f9",
-            padding: "15px",
-            borderRadius: "10px",
-            boxShadow: "0px 4px 10px rgba(0,0,0,0.2)",
-            zIndex: "10000",
-            fontFamily: "Arial, sans-serif",
-            width: "350px"
+    function montarInterfaz() {
+        if (document.getElementById('sv-panel') || !document.body) return;
+
+        const styleSheet = document.createElement("style");
+        styleSheet.textContent = CSS_PREMIUM;
+        document.head.appendChild(styleSheet);
+
+        const win = crearEl('div', { id: 'sv-panel' });
+        const head = crearEl('div', { className: 'sv-head', textContent: 'SISVAN Intelligence v6.5' });
+        const main = crearEl('div', { className: 'sv-main' });
+
+        const config = [
+            { id: 'q', label: '⚡ Pegado Inteligente', class: 'sv-q-paste', ph: 'Pega la fila de Excel aquí...' },
+            { id: 'n', label: '👤 Transcriptor', ph: 'Nombre' },
+            { id: 'c', label: '🆔 Cédula', ph: 'Cédula' },
+            { id: 'ct', label: '📂 Categoría', ph: 'Categoría' },
+            { id: 'f', label: '📅 Fecha', ph: 'DD/MM/AAAA' },
+            { id: 'm', label: '📍 Municipio', ph: 'Municipio' },
+            { id: 'p', label: '🏘 Parroquia', ph: 'Parroquia' },
+            { id: 'i', label: '🏫 Institución', ph: 'Institución' },
+            { id: 's', label: '🏠 Sector', ph: 'Sector Comunitario' },
+            { id: 'cr', label: '🌀 Circuito', ph: 'Circuito Comunal' },
+            { id: 'cm', label: '🚩 Comuna', ph: 'Nombre Comuna' }
+        ];
+
+        config.forEach(item => {
+            if(item.id === 's') main.appendChild(crearEl('div', {className: 'sv-sep'}));
+            const label = crearEl('label', { className: 'sv-tag', textContent: item.label });
+            const input = crearEl('input', { id: 'sv-in-' + item.id, className: 'sv-field ' + (item.class || ''), placeholder: item.ph, type: 'text', autocomplete: 'off' });
+            main.append(label, input);
         });
 
-        const titulo = document.createElement("h3");
-        titulo.innerText = "Autocompletar SISVAN";
-        Object.assign(titulo.style, { margin: "0 0 10px", color: "#333", textAlign: "center" });
+        const run = crearEl('button', { id: 'sv-run', className: 'sv-action-btn btn-prime', textContent: 'RELLENAR FORMULARIO' });
+        const auto = crearEl('button', { id: 'sv-auto', className: 'sv-action-btn btn-status', textContent: 'AUTO-CARGA: OFF' });
 
-        const inputTexto = document.createElement("textarea");
-        Object.assign(inputTexto, {
-            placeholder: "Nombre, Cedula,Origen del caso,caso social,fecha dia/mes/año,Municipio,parroquia",
-            rows: 3,
-            cols: 50,
-            width: "100%",
-            padding: "8px",
-            border: "1px solid #ccc",
-            borderRadius: "5px",
-            fontSize: "14px",
-            resize: "none"
-        });
-        inputTexto.value = localStorage.getItem("datosCSV") || "";
+        main.append(run, auto);
+        win.append(head, main);
+        document.body.appendChild(win);
 
-        const botonCargar = document.createElement("button");
-        botonCargar.innerText = "Cargar Datos";
-        Object.assign(botonCargar.style, {
-            display: "block",
-            width: "100%",
-            padding: "10px",
-            marginTop: "10px",
-            backgroundColor: "#007BFF",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            fontSize: "16px",
-            cursor: "pointer"
+        setupLogic();
+    }
+
+    function setupLogic() {
+        const saved = JSON.parse(localStorage.getItem('sv_pro_v65') || '{}');
+        const ids = ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'];
+
+        ids.forEach(id => {
+            const el = document.getElementById('sv-in-' + id);
+            if (saved[id]) el.value = saved[id];
+            el.addEventListener('input', save);
         });
 
-        const botonAutoCargar = document.createElement("button");
-        botonAutoCargar.innerText = estaAutoCargando ? "Detener Auto Carga" : "Auto Cargar (1s)";
-        Object.assign(botonAutoCargar.style, {
-            display: "block",
-            width: "100%",
-            padding: "10px",
-            marginTop: "10px",
-            backgroundColor: estaAutoCargando ? "#dc3545" : "#28a745",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            fontSize: "16px",
-            cursor: "pointer"
+        document.getElementById('sv-in-q').addEventListener('input', (e) => {
+            const val = e.target.value.split(',').map(s => s.trim());
+            if (val.length >= 7) {
+                const map = ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'];
+                map.forEach((key, i) => { if(val[i]) document.getElementById('sv-in-' + key).value = val[i]; });
+                e.target.value = ""; save();
+            }
         });
 
-        botonCargar.addEventListener("mouseover", () => botonCargar.style.backgroundColor = "#0056b3");
-        botonCargar.addEventListener("mouseout", () => botonCargar.style.backgroundColor = "#007BFF");
-        botonAutoCargar.addEventListener("mouseover", () => botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#bd2130" : "#218838");
-        botonAutoCargar.addEventListener("mouseout", () => botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#dc3545" : "#28a745");
+        document.getElementById('sv-run').addEventListener('click', fill);
 
-        botonCargar.addEventListener("click", () => {
-            cargarDatosDesdeCSV(inputTexto.value);
-        });
+        const btnAuto = document.getElementById('sv-auto');
+        let isAuto = sessionStorage.getItem('sv_auto_pro') === 'true';
 
-        botonAutoCargar.addEventListener("click", () => {
-            const nuevoEstado = !estaAutoCargando;
-            guardarEstadoAutoCargar(nuevoEstado);
-
-            if (nuevoEstado) {
-                botonAutoCargar.innerText = "Detener Auto Carga";
-                botonAutoCargar.style.backgroundColor = "#dc3545";
-                autoCargarInterval = setInterval(() => {
-                    cargarDatosDesdeCSV(inputTexto.value);
-                }, 500);
+        const updateAuto = () => {
+            if (isAuto) {
+                btnAuto.textContent = "AUTO-CARGA: ON";
+                btnAuto.classList.add('on');
+                fill();
             } else {
-                botonAutoCargar.innerText = "Auto Cargar (1s)";
-                botonAutoCargar.style.backgroundColor = "#28a745";
-                clearInterval(autoCargarInterval);
-                autoCargarInterval = null;
+                btnAuto.textContent = "AUTO-CARGA: OFF";
+                btnAuto.classList.remove('on');
             }
-        });
-
-        contenedor.append(titulo, inputTexto, botonCargar, botonAutoCargar);
-        document.body.appendChild(contenedor);
-
-        if (estaAutoCargando) {
-            autoCargarInterval = setInterval(() => {
-                cargarDatosDesdeCSV(inputTexto.value);
-            }, 500);
-        }
-    }
-
-    function cargarDatosDesdeCSV(csvText) {
-        const valores = csvText.split(",").map(val => val.trim());
-        if (valores.length < 7) {
-            console.error("Error: Se requieren al menos 7 valores en el CSV.");
-            return;
-        }
-
-        localStorage.setItem("datosCSV", csvText);
-
-        datosCSV = {
-            nombres_transcriptor: valores[0],
-            cedula_transcriptor: valores[1],
-            categoria_id: valores[2],
-            fecha_abordaje: convertirFecha(valores[4]),
-            municipio1: valores[3] || "",
-            municipio2: valores[5] || "",
-            institucion: valores[6] || ""
         };
 
-        llenarPrimeraPagina(datosCSV, 0);
-    }
-
-    function convertirFecha(fecha) {
-        const [dia, mes, año] = fecha.split(/[-/]/);
-        return `${año}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
-    }
-
-    function llenarCampo(selector, valor) {
-        const campo = document.querySelector(selector);
-        if (campo) {
-            campo.value = valor;
-            ["input", "change", "blur"].forEach(evt => campo.dispatchEvent(new Event(evt, { bubbles: true })));
-        }
-    }
-
-    function seleccionarPorID(nombre) {
-        const opciones = {
-            "ABORDAJE COMUNITARIO": "i16",
-            "CASO SOCIAL": "i19",
-            "NUCLEO DURO": "i22",
-            "REMISIÓN POLITICA": "i25",
-            "GM IGUALDAD Y JUSTICIA SOCIAL": "i28",
-            "GM ABUELOS DE LA PATRIA": "i31"
-        };
-
-        const id = opciones[nombre];
-        if (!id) {
-            console.error(`❌ No se encontró una opción válida para: ${nombre}`);
-            return;
-        }
-
-        const opcion = document.querySelector(`div[role="radio"]#${id}`);
-        if (opcion) {
-            opcion.click();
-            console.log(`✔ Categoría seleccionada: ${nombre}`);
-
-            setTimeout(() => {
-                const isSelected = opcion.getAttribute("aria-checked") === "true";
-                if (!isSelected) {
-                    console.warn(`⚠ La opción ${nombre} (${id}) no quedó seleccionada. Reintentando...`);
-                    opcion.click();
-                }
-            }, 200);
-        } else {
-            console.error(`❌ No se encontró la categoría con ID: ${id}`);
-        }
-    }
-
-    function seleccionarOpcionRadio(texto1, texto2) {
-        let opcion = document.evaluate(`//div[@role="radio" and @aria-label="${texto1}"]`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        if (!opcion && texto2) {
-            console.warn(`No se encontró "${texto1}". Probando con "${texto2}"...`);
-            opcion = document.evaluate(`//div[@role="radio" and @aria-label="${texto2}"]`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        }
-        if (opcion) {
-            opcion.click();
-        } else {
-            console.error(`No se encontró ninguna opción para "${texto1}" ni "${texto2}".`);
-        }
-    }
-
-    function seleccionarInstitucion(nombreInstitucion) {
-        let seleccionada = false;
-        document.querySelectorAll('div[role="radio"]').forEach(opcion => {
-            if (opcion.getAttribute("aria-label") === nombreInstitucion) {
-                opcion.click();
-                seleccionada = true;
-                console.log(`✔ Institución seleccionada: ${nombreInstitucion}`);
-            }
+        btnAuto.addEventListener('click', () => {
+            isAuto = !isAuto;
+            sessionStorage.setItem('sv_auto_pro', isAuto);
+            updateAuto();
         });
+        updateAuto();
+    }
 
-        if (!seleccionada) {
-            console.error(`❌ No se encontró la institución: ${nombreInstitucion}`);
+    function save() {
+        const d = {};
+        ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'].forEach(id => d[id] = document.getElementById('sv-in-' + id).value);
+        localStorage.setItem('sv_pro_v65', JSON.stringify(d));
+    }
+
+    function fill() {
+        const d = JSON.parse(localStorage.getItem('sv_pro_v65') || '{}');
+        if (!d.n) return;
+
+        // Detección de Inputs por aria-labelledby (Como solicitaste)
+        const in_1_4 = document.querySelector('input[aria-labelledby="i1 i4"]');
+        const in_6_9 = document.querySelector('input[aria-labelledby="i6 i9"]');
+        const in_11_14 = document.querySelector('input[aria-labelledby="i11 i14"]');
+        const in_date = document.querySelector('input[type="date"]');
+
+        // LÓGICA DE PÁGINA DEL BENEFICIARIO (Sector, Circuito, Comuna)
+        if (in_11_14) {
+            type(in_1_4, d.s);    // Sector
+            type(in_6_9, d.cr);   // Circuito
+            type(in_11_14, d.cm); // Comuna
+            next(); return;
+        }
+
+        // LÓGICA PÁGINA 1 (Nombre, Cédula, Categoría)
+        if (in_1_4 && document.querySelector('div[role="radio"]')) {
+            type(in_1_4, d.n);
+            type(in_6_9, d.c);
+            click(d.ct);
+            next(); return;
+        }
+
+        // LÓGICA PÁGINA 2 (Fecha, Municipio)
+        if (in_date) {
+            const iso = d.f.split(/[-/]/);
+            if(iso.length === 3) type(in_date, `${iso[2]}-${iso[1].padStart(2, '0')}-${iso[0].padStart(2, '0')}`);
+            click(d.m);
+            next(); return;
+        }
+
+        // LÓGICA RADIOS SUELTOS (Parroquia o Institución)
+        if (document.querySelector('div[role="radio"]')) {
+            if (click(d.i) || click(d.p)) next();
         }
     }
 
-    function siguientePagina(intentos = 0, callback) {
-        const boton = document.evaluate('//span[text()="Siguiente"]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        if (boton) {
-            boton.click();
-            console.log(`Intento ${intentos + 1}: Avanzando de página...`);
-            setTimeout(() => callback(datosCSV, 0), RETRASO_MIN);
-        } else if (intentos < MAX_INTENTOS) {
-            console.warn(`Intento ${intentos + 1} fallido. Reintentando...`);
-            setTimeout(() => siguientePagina(intentos + 1, callback), RETRASO_MIN);
-        } else {
-            console.error("No se pudo avanzar después de varios intentos.");
+    function type(el, v) { if (el && v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } }
+
+    function click(txt) {
+        if (!txt) return false;
+        const t = txt.trim().toUpperCase();
+        const xpath = `//div[@role="radio" or @role="checkbox"]//span[contains(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), "${t}")] | //div[@aria-label[contains(translate(., 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), "${t}")]]`;
+        const res = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        if (res) {
+            res.click();
+            const p = res.closest('div[role="radio"]');
+            if (p) p.click();
+            return true;
         }
+        return false;
     }
 
-    function llenarPrimeraPagina(datos, intentos) {
-        llenarCampo(`input[aria-labelledby="i1 i4"]`, datos.nombres_transcriptor);
-        llenarCampo(`input[aria-labelledby="i6 i9"]`, datos.cedula_transcriptor);
-        seleccionarPorID(datos.categoria_id);
-        setTimeout(() => siguientePagina(intentos, llenarSegundaPagina), RETRASO_MIN);
+    function next() {
+        setTimeout(() => {
+            const b = document.evaluate('//span[text()="Siguiente" or text()="Enviar"]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (b) b.click();
+        }, RETRASO_ACCION);
     }
 
-    function llenarSegundaPagina(datos, intentos) {
-        llenarCampo(`input[type="date"][aria-labelledby="i6"]`, datos.fecha_abordaje);
-        seleccionarOpcionRadio(datos.municipio1, datos.municipio2);
-        setTimeout(() => siguientePagina(intentos, llenarTerceraPagina), RETRASO_MIN);
+    // Inicialización inmediata
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        montarInterfaz();
+    } else {
+        window.addEventListener('DOMContentLoaded', montarInterfaz);
     }
+    // Backup por si el DOM tarda mucho
+    setTimeout(montarInterfaz, 500);
 
-    function llenarTerceraPagina(datos, intentos) {
-        seleccionarInstitucion(datos.institucion);
-        setTimeout(() => siguientePagina(intentos, () => console.log("✔ Formulario completado.")), RETRASO_MIN);
-    }
-
-    // Limpiar sessionStorage al cerrar la pestaña
-    window.addEventListener('beforeunload', function() {
-        if (!estaAutoCargando) {
-            sessionStorage.removeItem('autoCargarActivo');
-        }
-    });
-
-    crearInterfazCarga();
 })();
