@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Premium Edition v6.6
+// @name         AutoFill SISVAN - Premium Edition v6.7
 // @namespace    http://tampermonkey.net/
-// @version      6.6
-// @description  Botones fijos arriba, sin título, diseño premium a la izquierda.
+// @version      6.7
+// @description  Añadido botón de minimizar, diseño premium a la izquierda.
 // @author       User
 // @match        https://docs.google.com/forms/d/e/1FAIpQLSeERJOjmc-5ubYtuxSk7xD1IHKGRl_jfGNHbM3JB1KqaZ9ISw/*
 // @match        https://docs.google.com/forms/*
@@ -25,39 +25,58 @@
             z-index: 100000;
             font-family: 'Segoe UI', Roboto, Arial, sans-serif;
             border: 1px solid rgba(26, 115, 232, 0.2);
+            transition: width 0.3s ease, height 0.3s ease;
+            overflow: hidden;
         }
+        #sv-panel.minimized { width: 140px; height: 45px; }
+        #sv-panel.minimized .sv-main { display: none; }
+        
         .sv-head-btns {
-            display: flex; gap: 8px; padding: 12px;
+            display: flex; gap: 5px; padding: 8px;
             background: #f8f9fa;
             border-radius: 16px 16px 0 0;
             border-bottom: 1px solid #eee;
+            align-items: center;
         }
+        #sv-panel.minimized .sv-head-btns { border-radius: 16px; border-bottom: none; }
+
         .sv-main { padding: 12px 15px 15px; max-height: 75vh; overflow-y: auto; }
         .sv-tag { display: block; font-size: 10px; color: #70757a; font-weight: 700; margin: 8px 0 3px; text-transform: uppercase; }
+        
         .sv-field {
             width: 100%; padding: 8px 12px; border: 1px solid #dee2e6; border-radius: 8px;
             font-size: 13px; margin-bottom: 4px; box-sizing: border-box;
             background: #fff; transition: all 0.2s;
         }
         .sv-field:focus { border-color: #1a73e8; outline: none; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
+        
         .sv-btn-top {
-            flex: 1; padding: 10px 5px; border: none; border-radius: 10px;
-            cursor: pointer; font-weight: 600; font-size: 11px;
+            border: none; border-radius: 8px;
+            cursor: pointer; font-weight: 600; font-size: 10px;
             transition: all 0.2s; text-align: center; text-transform: uppercase;
+            height: 30px;
         }
-        .btn-fill { background: #1a73e8; color: white; box-shadow: 0 4px 6px rgba(26,115,232,0.2); }
-        .btn-fill:hover { background: #1557b0; transform: translateY(-1px); }
-        .btn-auto { background: #fff; color: #3c4043; border: 1px solid #dadce0; }
+        .btn-fill { flex: 2; background: #1a73e8; color: white; }
+        .btn-fill:hover { background: #1557b0; }
+        .btn-auto { flex: 2; background: #fff; color: #3c4043; border: 1px solid #dadce0; }
         .btn-auto.on { background: #e6f4ea; color: #137333; border-color: #ceead6; font-weight: 800; }
+        .btn-min { flex: 1; background: #eee; color: #666; font-size: 14px; }
+        
+        #sv-panel.minimized .btn-fill, #sv-panel.minimized .btn-auto { display: none; }
+        #sv-panel.minimized .btn-min { flex: 1; background: #1a73e8; color: white; }
+
         .sv-q-paste { background: #fffde7; border: 1px dashed #fbc02d; margin-bottom: 10px; }
         .sv-sep { height: 1px; background: #eee; margin: 15px 0 10px; position: relative; }
-        .sv-sep::after { content: "DATOS BENEFICIARIO"; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); background: white; padding: 0 8px; font-size: 8px; color: #aaa; letter-spacing: 1px; }
+        .sv-sep::after { 
+            content: "DATOS BENEFICIARIO"; position: absolute; top: -6px; left: 50%; 
+            transform: translateX(-50%); background: white; padding: 0 8px; 
+            font-size: 8px; color: #aaa; letter-spacing: 1px; 
+        }
     `;
 
-    function crearEl(tag, props = {}, style = {}) {
+    function crearEl(tag, props = {}) {
         const el = document.createElement(tag);
         Object.assign(el, props);
-        Object.assign(el.style, style);
         return el;
     }
 
@@ -72,10 +91,12 @@
         const head = crearEl('div', { className: 'sv-head-btns' });
         const main = crearEl('div', { className: 'sv-main' });
 
-        // Botones en el lugar del título
+        // Botones superiores
         const runBtn = crearEl('button', { id: 'sv-run', className: 'sv-btn-top btn-fill', textContent: 'RELLENAR' });
         const autoBtn = crearEl('button', { id: 'sv-auto', className: 'sv-btn-top btn-auto', textContent: 'AUTO: OFF' });
-        head.append(runBtn, autoBtn);
+        const minBtn = crearEl('button', { id: 'sv-min', className: 'sv-btn-top btn-min', textContent: '—' });
+        
+        head.append(runBtn, autoBtn, minBtn);
 
         const config = [
             { id: 'q', label: '⚡ Pegado Inteligente', class: 'sv-q-paste', ph: 'Pegar datos aquí...' },
@@ -101,19 +122,33 @@
         win.append(head, main);
         document.body.appendChild(win);
 
-        setupLogic();
+        // Aplicar estado de minimizado guardado
+        if (sessionStorage.getItem('sv_minimized') === 'true') {
+            win.classList.add('minimized');
+            minBtn.textContent = '▢';
+        }
+
+        setupLogic(win, minBtn);
     }
 
-    function setupLogic() {
-        const saved = JSON.parse(localStorage.getItem('sv_pro_v66') || '{}');
+    function setupLogic(win, minBtn) {
+        const saved = JSON.parse(localStorage.getItem('sv_pro_v67') || '{}');
         const ids = ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'];
-
+        
         ids.forEach(id => {
             const el = document.getElementById('sv-in-' + id);
             if (saved[id]) el.value = saved[id];
             el.addEventListener('input', save);
         });
 
+        // Toggle Minimizar
+        minBtn.addEventListener('click', () => {
+            const isMin = win.classList.toggle('minimized');
+            minBtn.textContent = isMin ? '▢' : '—';
+            sessionStorage.setItem('sv_minimized', isMin);
+        });
+
+        // Pegado rápido
         document.getElementById('sv-in-q').addEventListener('input', (e) => {
             const val = e.target.value.split(',').map(s => s.trim());
             if (val.length >= 7) {
@@ -150,11 +185,11 @@
     function save() {
         const d = {};
         ['n', 'c', 'ct', 'f', 'm', 'p', 'i', 's', 'cr', 'cm'].forEach(id => d[id] = document.getElementById('sv-in-' + id).value);
-        localStorage.setItem('sv_pro_v66', JSON.stringify(d));
+        localStorage.setItem('sv_pro_v67', JSON.stringify(d));
     }
 
     function fill() {
-        const d = JSON.parse(localStorage.getItem('sv_pro_v66') || '{}');
+        const d = JSON.parse(localStorage.getItem('sv_pro_v67') || '{}');
         if (!d.n) return;
 
         const in_1_4 = document.querySelector('input[aria-labelledby="i1 i4"]');
@@ -162,19 +197,16 @@
         const in_11_14 = document.querySelector('input[aria-labelledby="i11 i14"]');
         const in_date = document.querySelector('input[type="date"]');
 
-        // LÓGICA BENEFICIARIO
         if (in_11_14) {
             type(in_1_4, d.s); type(in_6_9, d.cr); type(in_11_14, d.cm);
             next(); return;
         }
 
-        // PÁGINA 1
         if (in_1_4 && document.querySelector('div[role="radio"]')) {
             type(in_1_4, d.n); type(in_6_9, d.c); click(d.ct);
             next(); return;
         }
 
-        // PÁGINA 2
         if (in_date) {
             const iso = d.f.split(/[-/]/);
             if(iso.length === 3) type(in_date, `${iso[2]}-${iso[1].padStart(2, '0')}-${iso[0].padStart(2, '0')}`);
@@ -182,7 +214,6 @@
             next(); return;
         }
 
-        // RADIOS SUELTOS
         if (document.querySelector('div[role="radio"]')) {
             if (click(d.i) || click(d.p)) next();
         }
