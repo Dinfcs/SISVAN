@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Script Principal
-// @version      2.0
-// @description  Define y carga scripts auxiliares desde GitHub
+// @version      2.4
+// @description  Carga scripts auxiliares desde GitHub usando patrones RegExp sin caché (JSON externo)
 // @author       Luis Escalante
 // @match        *://*/*
 // @grant        none
@@ -24,15 +24,24 @@
     };
 
     try {
-        // Descargar lista desde GitHub
-        const response = await fetch('https://dinfcs.github.io/SISVAN/scriptsList.js');
-        const scripts = await response.json();
+        // Descargar lista desde GitHub sin caché
+        const response = await fetch(
+            `https://dinfcs.github.io/SISVAN/scriptsList.json?nocache=${Date.now()}`,
+            { cache: 'no-store' }
+        );
+        const rawScripts = await response.json();
 
+        // Convertir los patrones string en RegExp
+        const scripts = rawScripts.map(({ urlPattern, scriptUrl }) => ({
+            urlPattern: new RegExp(urlPattern),
+            scriptUrl
+        }));
+
+        // Filtrar y cargar los scripts que coincidan con la URL actual
         scripts
-            .filter(({ urlPattern }) => new RegExp(urlPattern).test(window.location.href))
+            .filter(({ urlPattern }) => urlPattern.test(window.location.href))
             .forEach(({ scriptUrl }) => loadScript(scriptUrl));
 
-        // Ya no se carga UniversalAE.js
     } catch (error) {
         console.error('Error loading scripts:', error);
     }
