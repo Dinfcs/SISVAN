@@ -1,239 +1,245 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Rápido y Reintentos (Mejorado)
+// @name         AutoFill SISVAN - Edición Salud Bolívar v7.0
 // @namespace    http://tampermonkey.net/
-// @version      4.4
-// @description  Autocompleta el formulario SISVAN con datos de CSV y selecciona la institución educativa.
-// @match        https://docs.google.com/forms/*1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q*
+// @version      7.0
+// @description  Adaptado para SISVAN BOLÍVAR (Transcriptor, Fecha, Municipio, Parroquia, Organismo)
+// @author       User
+// @match        https://docs.google.com/forms/d/e/1FAIpQLSeW5L6vfgcBXbZTs2K3gVuyioFlD0SsgmL2um4n7Lf4bOinCw/*
 // @grant        none
+// @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    let datosCSV = null;
-    const MAX_INTENTOS = 5;
-    const RETRASO_MIN = 300; // Milisegundos entre intentos
-    let autoCargarInterval = null;
-    let estaAutoCargando = sessionStorage.getItem('autoCargarActivo') === 'true';
+    const RETRASO_ACCION = 800; // Milisegundos entre acciones
 
-    function guardarEstadoAutoCargar(estado) {
-        estaAutoCargando = estado;
-        sessionStorage.setItem('autoCargarActivo', estado);
+    const CSS_PREMIUM = `
+        #sv-panel {
+            position: fixed; top: 15px; left: 15px; width: 310px;
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            z-index: 100000;
+            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+            border: 1px solid #1a73e8;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        #sv-panel.minimized { width: 180px; height: 46px; border-radius: 12px; }
+        #sv-panel.minimized .sv-main { display: none; }
+        
+        .sv-head-btns {
+            display: flex; gap: 6px; padding: 8px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+        .sv-main { padding: 12px 15px 15px; max-height: 80vh; overflow-y: auto; }
+        .sv-tag { display: block; font-size: 10px; color: #1a73e8; font-weight: 700; margin: 8px 0 3px; text-transform: uppercase; }
+        
+        .sv-field {
+            width: 100%; padding: 8px 12px; border: 1px solid #dee2e6; border-radius: 8px;
+            font-size: 13px; margin-bottom: 4px; box-sizing: border-box;
+            background: #fff; transition: all 0.2s;
+        }
+        .sv-field:focus { border-color: #1a73e8; outline: none; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
+        
+        .sv-btn-top {
+            border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 10px;
+            transition: all 0.2s; height: 30px; display: flex; align-items: center; justify-content: center;
+        }
+        .btn-fill { flex: 3; background: #1a73e8; color: white; }
+        .btn-auto { flex: 2; background: #fff; color: #3c4043; border: 1px solid #dadce0; }
+        .btn-auto.on { background: #e6f4ea; color: #137333; border-color: #ceead6; font-weight: 800; }
+        .btn-min { width: 30px; flex: none; background: #eee; color: #666; }
+
+        .sv-sep { height: 1px; background: #eee; margin: 15px 0 10px; position: relative; }
+        .sv-sep::after { 
+            content: "UBICACIÓN Y SALUD"; position: absolute; top: -6px; left: 50%; 
+            transform: translateX(-50%); background: white; padding: 0 8px; 
+            font-size: 8px; color: #aaa; letter-spacing: 1px; 
+        }
+    `;
+
+    function crearEl(tag, props = {}) {
+        const el = document.createElement(tag);
+        Object.assign(el, props);
+        return el;
     }
 
-    function crearInterfazCarga() {
-        const contenedor = document.createElement("div");
-        Object.assign(contenedor.style, {
-            position: "fixed",
-            top: "10px",
-            left: "10px",
-            backgroundColor: "white",
-            padding: "15px",
-            borderRadius: "8px",
-            boxShadow: "0px 0px 10px rgba(0,0,0,0.2)",
-            zIndex: "10000",
-            fontFamily: "Arial, sans-serif",
-            width: "300px"
+    function montarInterfaz() {
+        if (document.getElementById('sv-panel') || !document.body) return;
+
+        const styleSheet = document.createElement("style");
+        styleSheet.textContent = CSS_PREMIUM;
+        document.head.appendChild(styleSheet);
+
+        const win = crearEl('div', { id: 'sv-panel' });
+        const head = crearEl('div', { className: 'sv-head-btns' });
+        const main = crearEl('div', { className: 'sv-main' });
+
+        const runBtn = crearEl('button', { id: 'sv-run', className: 'sv-btn-top btn-fill', textContent: 'RELLENAR' });
+        const autoBtn = crearEl('button', { id: 'sv-auto', className: 'sv-btn-top btn-auto', textContent: 'AUTO: OFF' });
+        const minBtn = crearEl('button', { id: 'sv-min', className: 'sv-btn-top btn-min', textContent: '—' });
+        
+        head.append(runBtn, autoBtn, minBtn);
+
+        const config = [
+            { id: 'n', label: '👤 Transcriptor', ph: 'Nombre y Apellido' },
+            { id: 'c', label: '🆔 Cédula', ph: 'V-000000' },
+            { id: 'f', label: '📅 Fecha Abordaje', ph: 'DD/MM/AAAA' },
+            { id: 'sep', type: 'sep' },
+            { id: 'm', label: '📍 Municipio', ph: 'Ej: CARONÍ' },
+            { id: 'p', label: '🏘 Parroquia', ph: 'Ej: CATEDRAL' },
+            { id: 'i', label: '🏫 Organismo Salud', ph: 'Ej: AUI LA SHELL' }
+        ];
+
+        config.forEach(item => {
+            if(item.type === 'sep') { main.appendChild(crearEl('div', {className: 'sv-sep'})); return; }
+            const label = crearEl('label', { className: 'sv-tag', textContent: item.label });
+            const input = crearEl('input', { id: 'sv-in-' + item.id, className: 'sv-field', placeholder: item.ph, type: 'text' });
+            main.append(label, input);
         });
 
-        const titulo = document.createElement("h4");
-        titulo.innerText = "Autocompletar SISVAN";
-        Object.assign(titulo.style, {
-            margin: "0 0 10px 0",
-            color: "#333",
-            textAlign: "center"
+        win.append(head, main);
+        document.body.appendChild(win);
+
+        if (sessionStorage.getItem('sv_minimized') === 'true') {
+            win.classList.add('minimized');
+            minBtn.textContent = '▢';
+        }
+
+        setupLogic(win, minBtn);
+    }
+
+    function setupLogic(win, minBtn) {
+        const saved = JSON.parse(localStorage.getItem('sv_salud_v7') || '{}');
+        const ids = ['n', 'c', 'f', 'm', 'p', 'i'];
+        
+        ids.forEach(id => {
+            const el = document.getElementById('sv-in-' + id);
+            if (saved[id]) el.value = saved[id];
+            el.addEventListener('input', save);
         });
 
-        const inputTexto = document.createElement("textarea");
-        Object.assign(inputTexto, {
-            placeholder: "Nombre,Cedula,Fecha (dia/mes/año),Municipio,Parroquia,Institución",
-            rows: 3,
-            cols: 40,
-            width: "100%",
-            padding: "8px",
-            marginBottom: "10px",
-            border: "1px solid #ddd",
-            borderRadius: "4px",
-            fontSize: "14px"
-        });
-        inputTexto.value = localStorage.getItem("datosCSV") || "";
-
-        const botonCargar = document.createElement("button");
-        botonCargar.innerText = "Cargar Datos";
-        Object.assign(botonCargar.style, {
-            width: "100%",
-            padding: "8px",
-            margin: "5px 0",
-            backgroundColor: "#4285f4",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer"
+        minBtn.addEventListener('click', () => {
+            const isMin = win.classList.toggle('minimized');
+            minBtn.textContent = isMin ? '▢' : '—';
+            sessionStorage.setItem('sv_minimized', isMin);
         });
 
-        const botonAutoCargar = document.createElement("button");
-        botonAutoCargar.innerText = estaAutoCargando ? "Detener Auto Carga" : "Auto Cargar (1s)";
-        Object.assign(botonAutoCargar.style, {
-            width: "100%",
-            padding: "8px",
-            margin: "5px 0",
-            backgroundColor: estaAutoCargando ? "#ea4335" : "#34a853",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer"
-        });
+        document.getElementById('sv-run').addEventListener('click', fill);
 
-        // Efectos hover
-        botonCargar.addEventListener("mouseover", () => botonCargar.style.backgroundColor = "#3367d6");
-        botonCargar.addEventListener("mouseout", () => botonCargar.style.backgroundColor = "#4285f4");
-        botonAutoCargar.addEventListener("mouseover", () => {
-            botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#d33426" : "#2d9246";
-        });
-        botonAutoCargar.addEventListener("mouseout", () => {
-            botonAutoCargar.style.backgroundColor = estaAutoCargando ? "#ea4335" : "#34a853";
-        });
+        const autoBtn = document.getElementById('sv-auto');
+        let isAuto = sessionStorage.getItem('sv_auto_salud') === 'true';
 
-        botonCargar.addEventListener("click", () => {
-            cargarDatosDesdeCSV(inputTexto.value);
-        });
-
-        botonAutoCargar.addEventListener("click", () => {
-            const nuevoEstado = !estaAutoCargando;
-            guardarEstadoAutoCargar(nuevoEstado);
-
-            if (nuevoEstado) {
-                botonAutoCargar.innerText = "Detener Auto Carga";
-                botonAutoCargar.style.backgroundColor = "#ea4335";
-                autoCargarInterval = setInterval(() => {
-                    cargarDatosDesdeCSV(inputTexto.value);
-                }, 1000);
+        const updateAuto = () => {
+            if (isAuto) {
+                autoBtn.textContent = "AUTO: ON";
+                autoBtn.classList.add('on');
+                fill();
             } else {
-                botonAutoCargar.innerText = "Auto Cargar (1s)";
-                botonAutoCargar.style.backgroundColor = "#34a853";
-                clearInterval(autoCargarInterval);
-                autoCargarInterval = null;
+                autoBtn.textContent = "AUTO: OFF";
+                autoBtn.classList.remove('on');
             }
-        });
-
-        contenedor.append(titulo, inputTexto, botonCargar, botonAutoCargar);
-        document.body.appendChild(contenedor);
-
-        // Iniciar auto-carga si estaba activo
-        if (estaAutoCargando) {
-            autoCargarInterval = setInterval(() => {
-                cargarDatosDesdeCSV(inputTexto.value);
-            }, 1000);
-        }
-    }
-
-    function cargarDatosDesdeCSV(csvText) {
-        const valores = csvText.split(",").map(val => val.trim());
-        if (valores.length < 6) {
-            console.error("Error: Se requieren al menos 6 valores en el CSV.");
-            return;
-        }
-
-        localStorage.setItem("datosCSV", csvText);
-
-        datosCSV = {
-            nombres_transcriptor: valores[0],
-            cedula_transcriptor: valores[1],
-            fecha_abordaje: convertirFecha(valores[2]),
-            municipio1: valores[3] || "",
-            municipio2: valores[4] || "",
-            institucion: valores[5] || ""
         };
 
-        llenarPrimeraPagina(datosCSV, 0);
+        autoBtn.addEventListener('click', () => {
+            isAuto = !isAuto;
+            sessionStorage.setItem('sv_auto_salud', isAuto);
+            updateAuto();
+        });
+        updateAuto();
     }
 
-    function convertirFecha(fecha) {
-        const [dia, mes, año] = fecha.split(/[-/]/);
-        return `${año}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+    function save() {
+        const d = {};
+        ['n', 'c', 'f', 'm', 'p', 'i'].forEach(id => d[id] = document.getElementById('sv-in-' + id).value);
+        localStorage.setItem('sv_salud_v7', JSON.stringify(d));
     }
 
-    function llenarCampo(selector, valor) {
-        const campo = document.querySelector(selector);
-        if (campo) {
-            campo.value = valor;
-            ["input", "change", "blur"].forEach(evt => campo.dispatchEvent(new Event(evt, { bubbles: true })));
-        }
-    }
+    function fill() {
+        const d = JSON.parse(localStorage.getItem('sv_salud_v7') || '{}');
+        let accionRealizada = false;
 
-    function llenarCampoFecha(ariaLabelledby, valor) {
-        const campo = document.querySelector(`input[type="date"][aria-labelledby="${ariaLabelledby}"]`);
-        if (campo) {
-            campo.focus();
-            setTimeout(() => llenarCampo(`input[type="date"][aria-labelledby="${ariaLabelledby}"]`, valor), 200);
-        }
-    }
+        // 1. Manejo de Text Inputs (Nombre y Cédula)
+        const inputsText = document.querySelectorAll('input[type="text"]:not(.sv-field)');
+        inputsText.forEach(input => {
+            const container = input.closest('div[role="listitem"], div[jsmodel]');
+            if (!container) return;
+            const text = container.innerText.toUpperCase();
 
-    function seleccionarOpcionRadio(texto1, texto2) {
-        let opcion = document.evaluate(`//div[@role="radio" and @aria-label="${texto1}"]`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        if (!opcion && texto2) {
-            console.warn(`No se encontró "${texto1}". Probando con "${texto2}"...`);
-            opcion = document.evaluate(`//div[@role="radio" and @aria-label="${texto2}"]`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        }
-        if (opcion) {
-            opcion.click();
-        } else {
-            console.error(`No se encontró ninguna opción para "${texto1}" ni "${texto2}".`);
-        }
-    }
-
-    function seleccionarInstitucion(nombreInstitucion) {
-        let seleccionada = false;
-        document.querySelectorAll('div[role="radio"]').forEach(opcion => {
-            if (opcion.getAttribute("aria-label") === nombreInstitucion) {
-                opcion.click();
-                seleccionada = true;
-                console.log(`✔ Institución seleccionada: ${nombreInstitucion}`);
+            if (text.includes("NOMBRES") || text.includes("TRANSCRIPTOR")) {
+                type(input, d.n); accionRealizada = true;
+            }
+            if (text.includes("CÉDULA") || text.includes("IDENTIDAD")) {
+                type(input, d.c); accionRealizada = true;
             }
         });
 
-        if (!seleccionada) {
-            console.error(`❌ No se encontró la institución: ${nombreInstitucion}`);
+        // 2. Manejo de Fecha
+        const inputDate = document.querySelector('input[type="date"]');
+        if (inputDate && d.f) {
+            const partes = d.f.split(/[-/]/);
+            if(partes.length === 3) {
+                // Formato DD/MM/AAAA a AAAA-MM-DD
+                const iso = `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}`;
+                type(inputDate, iso);
+                accionRealizada = true;
+            }
         }
+
+        // 3. Manejo de Opciones (Radio Buttons) para Municipio, Parroquia, Institución
+        const opciones = [d.m, d.p, d.i];
+        opciones.forEach(opt => {
+            if (opt && clickOption(opt)) accionRealizada = true;
+        });
+
+        // 4. Botón Siguiente / Enviar
+        if (accionRealizada) next();
     }
 
-    function siguientePagina(intentos = 0, callback) {
-        const boton = document.evaluate('//span[text()="Siguiente"]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-        if (boton) {
-            boton.click();
-            console.log(`Intento ${intentos + 1}: Avanzando de página...`);
-            setTimeout(() => callback(datosCSV, 0), RETRASO_MIN);
-        } else if (intentos < MAX_INTENTOS) {
-            console.warn(`Intento ${intentos + 1} fallido. Reintentando...`);
-            setTimeout(() => siguientePagina(intentos + 1, callback), RETRASO_MIN);
-        } else {
-            console.error("No se pudo avanzar después de varios intentos.");
+    function type(el, v) { 
+        if (el && v && el.value !== v) { 
+            el.value = v; 
+            el.dispatchEvent(new Event('input', { bubbles: true })); 
+            el.dispatchEvent(new Event('change', { bubbles: true })); 
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+        } 
+    }
+
+    function clickOption(txt) {
+        if (!txt) return false;
+        const t = txt.trim().toUpperCase();
+        // Busca el texto dentro de spans que están dentro de roles de radio o checkbox
+        const xpath = `//div[@role="radio" or @role="checkbox"]//span[contains(translate(text(), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), "${t}")]`;
+        const res = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        
+        if (res) {
+            const parent = res.closest('div[role="radio"], div[role="checkbox"]');
+            if (parent && parent.getAttribute('aria-checked') !== 'true') {
+                parent.click();
+                return true;
+            }
         }
+        return false;
     }
 
-    function llenarPrimeraPagina(datos, intentos) {
-        llenarCampo(`input[aria-labelledby="i1 i4"]`, datos.nombres_transcriptor);
-        llenarCampo(`input[aria-labelledby="i6 i9"]`, datos.cedula_transcriptor);
-        setTimeout(() => siguientePagina(intentos, llenarSegundaPagina), RETRASO_MIN);
+    function next() {
+        setTimeout(() => {
+            const b = document.evaluate('//span[text()="Siguiente" or text()="Enviar" or text()="Siguiente"]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (b) b.click();
+        }, RETRASO_ACCION);
     }
 
-    function llenarSegundaPagina(datos, intentos) {
-        llenarCampoFecha("i6", datos.fecha_abordaje);
-        seleccionarOpcionRadio(datos.municipio1, datos.municipio2);
-        setTimeout(() => siguientePagina(intentos, llenarTerceraPagina), RETRASO_MIN);
+    // Inicialización segura
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        montarInterfaz();
+    } else {
+        window.addEventListener('DOMContentLoaded', montarInterfaz);
     }
+    setTimeout(montarInterfaz, 500);
 
-    function llenarTerceraPagina(datos, intentos) {
-        seleccionarInstitucion(datos.institucion);
-        setTimeout(() => siguientePagina(intentos, () => console.log("✔ Formulario completado.")), RETRASO_MIN);
-    }
-
-    // Limpiar sessionStorage al cerrar la pestaña si no está activo
-    window.addEventListener('beforeunload', function() {
-        if (!estaAutoCargando) {
-            sessionStorage.removeItem('autoCargarActivo');
-        }
-    });
-
-    crearInterfazCarga();
 })();
