@@ -1,10 +1,11 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Bolívar CPV v8.0
+// @name         AutoFill SISVAN - Bolívar CPV v8.1
 // @namespace    http://tampermonkey.net/
-// @version      8.0
+// @version      8.1
 // @description  SISVAN Bolívar: Transcriptor, Fecha, Municipio → Parroquia → Escuela/Organismo con catálogo leído del propio formulario
 // @author       Luis Escalante
 // @match        https://docs.google.com/forms/d/e/1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q/*
+// @match        https://docs.google.com/forms/u/*/d/e/1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
@@ -15,7 +16,8 @@
     const RETRASO_ACCION = 800;   // Milisegundos antes de pulsar "Siguiente"
     const ESPERA_MAX = 10000;     // Máximo de espera a que Google habilite el formulario
 
-    const FORM_ID = (location.pathname.match(/\/forms\/d\/e\/([^/]+)/) || [])[1] || 'desconocido';
+    // Con sesión iniciada Google usa /forms/u/0/d/e/<ID>/... al pasar de sección
+    const FORM_ID = (location.pathname.match(/\/forms\/(?:u\/\d+\/)?d\/e\/([^/]+)/) || [])[1] || 'desconocido';
     const K_COMUN = 'sv_comun_v8';                 // Transcriptor, cédula, fecha (compartido entre formularios)
     const K_UBIC = 'sv_ubic_v8_' + FORM_ID;        // Municipio, parroquia, escuela (propio de cada formulario)
     const K_CATALOGO = 'sv_catalogo_v8_' + FORM_ID;
@@ -268,7 +270,7 @@
         statusEl = crearEl('div', { className: 'sv-status' });
         const foot = crearEl('div', { className: 'sv-foot' });
         contadorEl = crearEl('span');
-        foot.append(crearEl('span', { textContent: 'v8.0 · Alt+R rellena' }), contadorEl);
+        foot.append(crearEl('span', { textContent: 'v8.1 · Alt+R rellena' }), contadorEl);
         main.append(statusEl, foot);
 
         win.append(head, main);
@@ -314,20 +316,40 @@
         });
 
         // Modo automático
-        let isAuto = leerSesion(K_AUTO) === 'true';
+        modoAuto = leerSesion(K_AUTO) === 'true';
         const pintarAuto = () => {
-            autoBtn.textContent = isAuto ? 'AUTO: ON' : 'AUTO: OFF';
-            autoBtn.classList.toggle('on', isAuto);
+            autoBtn.textContent = modoAuto ? 'AUTO: ON' : 'AUTO: OFF';
+            autoBtn.classList.toggle('on', modoAuto);
         };
         autoBtn.addEventListener('click', () => {
-            isAuto = !isAuto;
-            guardarSesion(K_AUTO, isAuto);
+            modoAuto = !modoAuto;
+            guardarSesion(K_AUTO, modoAuto);
             pintarAuto();
-            if (isAuto) procesarPagina(true);
+            if (modoAuto) procesarPagina(true);
         });
         pintarAuto();
 
-        procesarPagina(isAuto);
+        procesarPagina(modoAuto);
+        vigilar(win, styleSheet);
+    }
+
+    // Si Google redibuja la página sin recargarla: devuelve el panel y procesa la nueva sección
+    function vigilar(win, styleSheet) {
+        let pendiente = false;
+        new MutationObserver(() => {
+            if (pendiente) return;
+            pendiente = true;
+            setTimeout(() => {
+                pendiente = false;
+                if (!document.head.contains(styleSheet)) document.head.appendChild(styleSheet);
+                if (!document.body.contains(win)) document.body.appendChild(win);
+                if (!procesando && ultimaFirma !== null && firmaSeccion() !== ultimaFirma) procesarPagina(modoAuto);
+            }, 300);
+        }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    function firmaSeccion() {
+        return preguntas().map(q => q.titulo).join('|') || (enlaceOtraRespuesta() ? 'confirmacion' : '');
     }
 
     function actualizarContador() {
@@ -425,12 +447,15 @@
     }
 
     let procesando = false;
+    let modoAuto = false;
+    let ultimaFirma = null;   // Títulos de la sección ya procesada, para detectar cambios de sección
 
     async function procesarPagina(avanzar) {
         if (procesando) return;
         procesando = true;
         try {
             const tipo = await esperar(formularioListo);
+            ultimaFirma = firmaSeccion();
 
             if (tipo === 'confirmacion') {
                 const nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
