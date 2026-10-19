@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Bolívar CPV v8.1
+// @name         AutoFill SISVAN - Bolívar CPV v8.2
 // @namespace    http://tampermonkey.net/
-// @version      8.1
+// @version      8.2
 // @description  SISVAN Bolívar: Transcriptor, Fecha, Municipio → Parroquia → Escuela/Organismo con catálogo leído del propio formulario
 // @author       Luis Escalante
 // @match        https://docs.google.com/forms/d/e/1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q/*
@@ -270,7 +270,7 @@
         statusEl = crearEl('div', { className: 'sv-status' });
         const foot = crearEl('div', { className: 'sv-foot' });
         contadorEl = crearEl('span');
-        foot.append(crearEl('span', { textContent: 'v8.1 · Alt+R rellena' }), contadorEl);
+        foot.append(crearEl('span', { textContent: 'v8.2 · Alt+R rellena' }), contadorEl);
         main.append(statusEl, foot);
 
         win.append(head, main);
@@ -381,8 +381,11 @@
         return norm(h ? h.textContent : '');
     }
 
+    // Solo preguntas con algo que responder: Google también pinta como listitem el encabezado
+    // de cada sección (p. ej. "FECHA DEL ABORDAJE"), con el mismo título que la pregunta
     function preguntas() {
         return [...document.querySelectorAll('div[role="listitem"]')]
+            .filter(el => el.querySelector('input:not([type="hidden"]), textarea, [role="radio"], [role="checkbox"], [role="listbox"]'))
             .map(el => ({ el, titulo: tituloDe(el) }))
             .filter(q => q.titulo);
     }
