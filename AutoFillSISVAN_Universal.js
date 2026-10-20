@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Universal v1.0
+// @name         AutoFill SISVAN - Universal v1.1
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Se configura solo leyendo las preguntas del formulario: marca cuáles son fijas y las rellena; avisa si el formulario cambia
 // @author       Luis Escalante
 // @match        https://docs.google.com/forms/d/e/1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q/*
@@ -17,13 +17,13 @@
 (function() {
     'use strict';
 
-    // Mientras conviva con AutoFillSISVAN2 (v8) en el mismo formulario, solo uno debe actuar.
-    // Se elige con el enlace del pie de cada panel; se guarda en sv_version.
-    try { if (localStorage.getItem('sv_version') !== 'universal') return; } catch (e) { return; }
+    // Si conviven con AutoFillSISVAN2 (v8) en el mismo formulario solo uno debe actuar: esta, salvo
+    // que se haya elegido volver a la v8 con el enlace "↩ v8" del pie (se guarda en sv_version).
+    try { if (localStorage.getItem('sv_version') === 'v8') return; } catch (e) { /* sin almacenamiento: actúa */ }
     if (window.__svUniversal) return;  // evita doble carga (Tampermonkey + cargador)
     window.__svUniversal = true;
 
-    const VERSION = '1.0';
+    const VERSION = '1.1';
     const RETRASO_ACCION = 800;   // Milisegundos antes de pulsar "Siguiente"
     const ESPERA_MAX = 10000;     // Máximo de espera a que Google habilite el formulario
 
@@ -871,10 +871,18 @@
     }
 
     // Inicialización segura (el cargador puede inyectar este script antes o después del DOM)
+    function iniciar() {
+        try {
+            montarInterfaz();
+        } catch (e) {
+            console.error('[SISVAN-U] Error al montar el panel:', e);
+        }
+    }
+    console.info('[SISVAN-U] Universal ' + VERSION + ' cargado en', location.pathname);
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', montarInterfaz);
+        document.addEventListener('DOMContentLoaded', iniciar);
     } else {
-        montarInterfaz();
+        iniciar();
     }
 
 })();

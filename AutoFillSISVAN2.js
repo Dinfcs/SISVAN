@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Bolívar CPV v8.4
+// @name         AutoFill SISVAN - Bolívar CPV v8.5
 // @namespace    http://tampermonkey.net/
-// @version      8.4
+// @version      8.5
 // @description  SISVAN Bolívar: Transcriptor, Fecha, Municipio → Parroquia → Escuela/Organismo con catálogo leído del propio formulario
 // @author       Luis Escalante
 // @match        https://docs.google.com/forms/d/e/1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q/*
@@ -13,8 +13,8 @@
 (function() {
     'use strict';
 
-    // Si se eligió la versión universal (AutoFillSISVAN_Universal.js), esta no actúa
-    try { if (localStorage.getItem('sv_version') === 'universal') return; } catch (e) { /* sin almacenamiento */ }
+    // Por defecto actúa AutoFillSISVAN_Universal.js; esta solo si se eligió con "↩ v8" en su pie
+    try { if (localStorage.getItem('sv_version') !== 'v8') return; } catch (e) { return; }
 
     const RETRASO_ACCION = 800;   // Milisegundos antes de pulsar "Siguiente"
     const ESPERA_MAX = 10000;     // Máximo de espera a que Google habilite el formulario
@@ -274,10 +274,10 @@
         statusEl = crearEl('div', { className: 'sv-status' });
         const foot = crearEl('div', { className: 'sv-foot' });
         contadorEl = crearEl('span');
-        const probar = crearEl('a', { textContent: 'Probar universal', title: 'Cambiar a AutoFillSISVAN Universal (se vuelve con "↩ v8")' });
+        const probar = crearEl('a', { textContent: 'Usar universal', title: 'Cambiar a AutoFillSISVAN Universal (se vuelve con "↩ v8")' });
         probar.style.cssText = 'cursor:pointer;text-decoration:underline';
         probar.addEventListener('click', () => { try { localStorage.setItem('sv_version', 'universal'); } catch (e) { /* sin almacenamiento */ } location.reload(); });
-        foot.append(crearEl('span', { textContent: 'v8.4 · Alt+R' }), contadorEl, probar);
+        foot.append(crearEl('span', { textContent: 'v8.5 · Alt+R' }), contadorEl, probar);
         main.append(statusEl, foot);
 
         win.append(head, main);
