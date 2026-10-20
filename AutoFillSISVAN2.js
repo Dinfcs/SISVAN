@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AutoFill SISVAN - Bolívar CPV v8.2
+// @name         AutoFill SISVAN - Bolívar CPV v8.3
 // @namespace    http://tampermonkey.net/
-// @version      8.2
+// @version      8.3
 // @description  SISVAN Bolívar: Transcriptor, Fecha, Municipio → Parroquia → Escuela/Organismo con catálogo leído del propio formulario
 // @author       Luis Escalante
 // @match        https://docs.google.com/forms/d/e/1FAIpQLScPb-tduoYfOTZ1nDhZaDwQPENA315YOXdTYdpjIrUoG7lp-Q/*
@@ -225,6 +225,7 @@
     let contadorEl = null;
 
     function estado(msg, tipo = '') {
+        console.info('[SISVAN]', msg, '|', firmaSeccion() || '(sin preguntas)', '|', location.pathname);
         if (!statusEl) return;
         statusEl.textContent = msg;
         statusEl.className = 'sv-status' + (tipo ? ' ' + tipo : '');
@@ -270,7 +271,7 @@
         statusEl = crearEl('div', { className: 'sv-status' });
         const foot = crearEl('div', { className: 'sv-foot' });
         contadorEl = crearEl('span');
-        foot.append(crearEl('span', { textContent: 'v8.2 · Alt+R rellena' }), contadorEl);
+        foot.append(crearEl('span', { textContent: 'v8.3 · Alt+R rellena' }), contadorEl);
         main.append(statusEl, foot);
 
         win.append(head, main);
@@ -311,9 +312,7 @@
 
         // Rellenar manual
         runBtn.addEventListener('click', () => procesarPagina(true));
-        document.addEventListener('keydown', e => {
-            if (e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); procesarPagina(true); }
-        });
+        document.addEventListener('keydown', atajo);
 
         // Modo automático
         modoAuto = leerSesion(K_AUTO) === 'true';
@@ -333,19 +332,24 @@
         vigilar(win, styleSheet);
     }
 
-    // Si Google redibuja la página sin recargarla: devuelve el panel y procesa la nueva sección
+    // Al pasar de sección Google puede redibujar o reemplazar la página entera sin recargarla.
+    // Un temporizador sobrevive a eso (un MutationObserver se queda mirando la página vieja):
+    // devuelve el panel y procesa la nueva sección
     function vigilar(win, styleSheet) {
-        let pendiente = false;
-        new MutationObserver(() => {
-            if (pendiente) return;
-            pendiente = true;
-            setTimeout(() => {
-                pendiente = false;
-                if (!document.head.contains(styleSheet)) document.head.appendChild(styleSheet);
-                if (!document.body.contains(win)) document.body.appendChild(win);
-                if (!procesando && ultimaFirma !== null && firmaSeccion() !== ultimaFirma) procesarPagina(modoAuto);
-            }, 300);
-        }).observe(document.documentElement, { childList: true, subtree: true });
+        setInterval(() => {
+            if (!document.body || !document.head) return;
+            if (!styleSheet.isConnected) document.head.appendChild(styleSheet);
+            if (!win.isConnected) {
+                document.body.appendChild(win);
+                document.addEventListener('keydown', atajo);
+                console.info('[SISVAN] Panel restaurado tras redibujo de la página');
+            }
+            if (!procesando && ultimaFirma !== null && firmaSeccion() !== ultimaFirma) procesarPagina(modoAuto);
+        }, 700);
+    }
+
+    function atajo(e) {
+        if (e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); procesarPagina(true); }
     }
 
     function firmaSeccion() {
@@ -404,11 +408,13 @@
 
     function escribirFecha(item, iso) {
         const c = camposFecha(item);
-        if (!c || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
-        if (c.nativo) { escribir(c.nativo, iso); return true; }
-        const [a, m, d] = iso.split('-');
-        escribir(c.dia, d); escribir(c.mes, m); escribir(c.anio, a);
-        return true;
+        if (!c || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+        if (c.nativo) escribir(c.nativo, iso);
+        else {
+            const [a, m, d] = iso.split('-');
+            escribir(c.dia, d); escribir(c.mes, m); escribir(c.anio, a);
+        }
+        return leerFecha(item) === iso;
     }
 
     function leerFecha(item) {
@@ -420,16 +426,30 @@
         return `${a}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
 
-    // Marca la opción cuyo valor coincide EXACTAMENTE (data-value), sin coincidencias parciales
+    // Marca la opción cuyo valor coincide EXACTAMENTE (data-value), sin coincidencias parciales.
+    // Devuelve null si no existe, true si quedó marcada y false si el clic aún no tomó
+    // (recién llegada la sección, Google ignora clics hasta terminar de cargarla)
     function marcarOpcion(item, valor) {
-        if (!valor) return false;
         const radios = [...item.querySelectorAll('[role="radio"]')];
         const objetivo = norm(valor);
         const r = radios.find(x => x.getAttribute('data-value') === valor)
             || radios.find(x => norm(x.getAttribute('data-value') || x.getAttribute('aria-label') || x.textContent) === objetivo);
-        if (!r) return false;
+        if (!r) return null;
         if (r.getAttribute('aria-checked') !== 'true') r.click();
-        return true;
+        return r.getAttribute('aria-checked') === 'true';
+    }
+
+    const pausa = ms => new Promise(r => setTimeout(r, ms));
+
+    // Espera a que la sección deje de cambiar (Google la va pintando por partes)
+    async function esperarEstable() {
+        let previa = firmaSeccion();
+        for (let i = 0; i < 20; i++) {
+            await pausa(250);
+            const actual = firmaSeccion();
+            if (actual === previa) return;
+            previa = actual;
+        }
     }
 
     function botonSiguiente() {
@@ -457,7 +477,9 @@
         if (procesando) return;
         procesando = true;
         try {
-            const tipo = await esperar(formularioListo);
+            let tipo = await esperar(formularioListo);
+            await esperarEstable();
+            tipo = formularioListo() || tipo;
             ultimaFirma = firmaSeccion();
 
             if (tipo === 'confirmacion') {
@@ -481,7 +503,12 @@
                 return;
             }
 
-            const res = rellenarSeccion();
+            // Rellena y vuelve a comprobar hasta que Google registre todo (máx. ~4 s)
+            let res = rellenarSeccion();
+            for (let intento = 0; res.pendientes && !res.faltan.length && intento < 10; intento++) {
+                await pausa(400);
+                res = rellenarSeccion();
+            }
             res.ayudas = instalarAyudas();
 
             if (res.total === 0) {
@@ -495,6 +522,10 @@
                 estado('Falta en el panel: ' + res.faltan.join(', '), 'warn');
                 return;
             }
+            if (res.pendientes) {
+                estado('Google no registró la selección. Pulsa RELLENAR de nuevo.', 'warn');
+                return;
+            }
             if (res.desconocidas) {
                 estado('Sección rellenada, pero tiene preguntas que el script no maneja. Revisa y pulsa Siguiente.', 'warn');
                 return;
@@ -504,11 +535,16 @@
                 return;
             }
             estado('Sección rellenada ✓ Pasando a la siguiente…', 'ok');
-            setTimeout(() => {
-                const b = botonSiguiente();
-                if (b) b.click();
-                else estado('Sección rellenada ✓ (no hay botón Siguiente)', 'ok');
-            }, RETRASO_ACCION);
+            await pausa(RETRASO_ACCION);
+            // Última comprobación justo antes de avanzar
+            const final = rellenarSeccion();
+            if (final.pendientes || final.faltan.length) {
+                estado('Una respuesta se desmarcó antes de avanzar. Pulsa RELLENAR de nuevo.', 'warn');
+                return;
+            }
+            const b = botonSiguiente();
+            if (b) b.click();
+            else estado('Sección rellenada ✓ (no hay botón Siguiente)', 'ok');
         } finally {
             procesando = false;
         }
@@ -517,19 +553,23 @@
     // Devuelve cuántas preguntas de cabecera había, cuáles faltan en el panel y si hay otras desconocidas
     function rellenarSeccion() {
         const t = catalogo.titulos;
-        const res = { total: 0, faltan: [], desconocidas: 0 };
+        const res = { total: 0, faltan: [], pendientes: 0, desconocidas: 0 };
 
         preguntas().forEach(({ el, titulo }) => {
+            // accion: true = listo, false = aún no registrado (reintentar), null = imposible
             const tarea = (nombre, valor, accion) => {
                 res.total++;
-                if (!valor || !accion(valor)) res.faltan.push(nombre);
+                const r = valor ? accion(valor) : null;
+                if (r === null) res.faltan.push(nombre);
+                else if (!r) res.pendientes++;
             };
             const input = el.querySelector('input[type="text"]');
+            const texto = v => { if (!input) return null; escribir(input, v); return input.value === v; };
 
             if (titulo.includes('TRANSCRIPTOR') && titulo.includes('NOMBRE')) {
-                tarea('Transcriptor', datos.n, v => { escribir(input, v); return !!input; });
+                tarea('Transcriptor', datos.n, texto);
             } else if (titulo.includes('TRANSCRIPTOR') && titulo.includes('CEDULA')) {
-                tarea('Cédula', datos.c, v => { escribir(input, v); return !!input; });
+                tarea('Cédula', datos.c, texto);
             } else if (titulo.includes('FECHA DEL ABORDAJE')) {
                 tarea('Fecha', datos.f, v => escribirFecha(el, v));
             } else if (t.mun.includes(titulo)) {
